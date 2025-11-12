@@ -1,28 +1,51 @@
 import pandas as pd
-from sklearn.tree import DecisionTreeClassifier, export_text
+import glob
+import os
 
-# Load your CSV file
-df = pd.read_csv("../data/Country_data.csv")
+files = glob.glob("data/*.csv")
 
-#print("COLUMNS:", df.columns.tolist())
-#exit()
+dfs = []
 
-# Create spread feature
-df["SPREAD_10Y"] = df["GR_10Y"] - df["DE_10Y"]
+for file in files:
+    print("Processing:", file)
 
-# Select features and labels
-features = ["DEFICIT_GDP", "INFLATION", "SPREAD_10Y", "CDS_5Y"]
-X = df[features]
-y = df["CRISIS LABEL"]
+    raw = pd.read_csv(file, header=None)
 
-# Train on all except last row, test on last row
-X_train = X.iloc[:-1]
-y_train = y.iloc[:-1]
-X_test = X.iloc[-1:]
-y_test = y.iloc[-1:]
+    # detect header row (first row with the word "Date")
+    header_row = raw[raw.apply(lambda row: row.astype(str).str.contains("Date", case=False)).any(axis=1)].index[0]
 
-clf = DecisionTreeClassifier(max_depth=3)
-clf.fit(X_train, y_train)
+    temp = pd.read_csv(file, header=header_row)
 
-print(export_text(clf, feature_names=features))
-print("Model accuracy:", clf.score(X_test, y_test))
+    # Standardize column names
+    temp.columns = (
+        temp.columns.astype(str)
+        .str.strip()
+        .str.lower()
+        .str.replace(" ", "_")
+        .str.replace("%", "pct")
+        .str.replace("/", "_")
+    )
+
+    # Remove duplicated columns
+    temp = temp.loc[:, ~temp.columns.duplicated()]
+
+    # Add country column based on filename
+    temp["country"] = os.path.basename(file).replace(".csv", "")
+
+    dfs.append(temp)
+
+# Combine all cleaned data
+df = pd.concat(dfs, ignore_index=True)
+
+# Convert numeric columns (remove commas, convert to float)
+for col in df.columns:
+    try:
+        df[col] = df[col].astype(str).str.replace(",", "").str.replace("%", "").astype(float)
+    except:
+        pass
+
+print("\n Final dataset shape:", df.shape)
+print(df.head())
+
+df.to_csv("data/merged_cleaned_dataset.csv", index=False)
+print("\n Saved cleaned dataset → data/merged_cleaned_dataset.csv")
