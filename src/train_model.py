@@ -68,7 +68,7 @@ for col in df.columns:
 if change_col is None:
     raise ValueError("No column containing 'change' found in dataset.")
 
-df["crisis_label"] = (df[change_col] < -3).astype(int)  # slightly relaxed threshold
+df["crisis_label"] = (df[change_col] < -40).astype(int)  # slightly relaxed threshold
 print(" Crisis label created. Sample:")
 print(df[[change_col, "crisis_label"]].head())
 
@@ -126,18 +126,54 @@ print(f" Training samples: {X_train.shape[0]}, Test samples: {X_test.shape[0]}")
 model = LogisticRegression(max_iter=5000, solver="saga", class_weight="balanced")
 model.fit(X_train, y_train)
 
+print("\nExample crisis probabilities:", model.predict_proba(X_bal_scaled)[:10])
+
+
 # ------------------------------
 # 9. Evaluate
 # ------------------------------
-y_pred = model.predict(X_test)
-print("\n📊 Model Evaluation Results:")
+y_pred_proba = model.predict_proba(X_test)[:, 1]  
+y_pred = (y_pred_proba > 0.5).astype(int)         
+
+print("\n Model Evaluation Results:")
 print(classification_report(y_test, y_pred))
 print("Accuracy:", round(accuracy_score(y_test, y_pred), 3))
+
+print("\nExample crisis probabilities:", y_pred_proba[:10]) 
+
+# ===============================
+# Additional Model Performance Checks
+# ===============================
+
+from sklearn.metrics import (
+    confusion_matrix,
+    roc_auc_score,
+    precision_score,
+    recall_score,
+)
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+print("\nConfusion Matrix:")
+print(cm)
+
+# ROC-AUC Score
+roc_auc = roc_auc_score(y_test, y_pred_proba)
+print("ROC-AUC Score:", round(roc_auc, 4))
+
+# Precision & Recall
+precision = precision_score(y_test, y_pred)
+recall = recall_score(y_test, y_pred)
+
+print("\nPrecision:", round(precision, 4))
+print("Recall:", round(recall, 4))
+
 
 # ------------------------------
 # 10. Save model, imputer, and scaler
 # ------------------------------
+# Save updated model
 joblib.dump(model, "../data/crisis_model.pkl")
 joblib.dump(imputer, "../data/imputer.pkl")
 joblib.dump(scaler, "../data/scaler.pkl")
-print("\n Model, imputer, and scaler saved to data/crisis_model.pkl, data/imputer.pkl, data/scaler.pkl")
+print(" Model, imputer, and scaler saved again.")
