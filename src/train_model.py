@@ -1,79 +1,76 @@
+import warnings
+warnings.filterwarnings("ignore")
+
 import pandas as pd
-import numpy as np
 import joblib
+import os
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, accuracy_score
-from sklearn.impute import SimpleImputer
-from sklearn.utils import resample
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.utils import resample
+from sklearn.metrics import classification_report, accuracy_score
 
 
 
 """
 train_model.py
-----------------
+------------------------------
+This script trains a binary classification model that predicts whether a sovereign
+debt crisis is occurring based on economic indicators.
 
-This script trains a simple machine learning model that serves as an early warning system
-for financial crises, using historical economic data from Greece.
+The pipeline performs the following steps:
+1. Load the merged clean dataset.
+2. Automatically detect key variable columns: bond yields, CDS spreads, and deficit.
+3. Create a binary crisis label based on a threshold (e.g., bond_yield_change < -1).
+4. Balance the dataset using upsampling to address class imbalance.
+5. Impute and scale numerical features to prepare for training.
+6. Train a Logistic Regression model with balanced class weights.
+7. Report model performance and feature importance.
+8. Save the model, imputer, and scaler for future predictions.
 
-The model applies logistic regression to predict whether a given period shows signs of
-financial distress (crisis) based on macroeconomic and market indicators such as
-deficits, debt levels, and bond yield changes. It prioritizes interpretability over
-complexity, aiming to demonstrate how machine learning can complement economic theory
-in crisis forecasting.
+Output files (saved inside /data):
+    • crisis_model.pkl   → trained logistic regression model
+    • imputer.pkl        → SimpleImputer used during training
+    • scaler.pkl         → StandardScaler used during training
 
-Main steps:
-    1. Load the cleaned dataset produced by model.py.
-    2. Automatically detect a column representing economic change and create a binary
-       crisis label (1 = crisis, 0 = stable).
-    3. Prepare features by selecting numeric columns and dropping empty ones.
-    4. Handle data imbalance through upsampling of the minority (crisis) class.
-    5. Impute missing values and scale all numeric features.
-    6. Split the data into training and testing sets.
-    7. Train a logistic regression classifier with class balancing enabled.
-    8. Evaluate performance using accuracy and classification metrics.
-    9. Save the trained model, imputer, and scaler as reusable .pkl files.
-
-Inputs:
-    - ../data/merged_cleaned_dataset.csv : Cleaned dataset created by model.py
-
-Outputs:
-    - ../data/crisis_model.pkl  : Trained logistic regression model
-    - ../data/imputer.pkl       : Median imputer for missing value handling
-    - ../data/scaler.pkl        : StandardScaler for feature normalization
-
-Intended Use:
-    This file is part of an academic project (ECON 302) demonstrating how economic
-    indicators and simple machine learning can be used to detect early warning signs
-    of financial crises in a transparent, explainable way.
+This file is meant to be run once after data cleaning is complete
+('merged_cleaned_dataset_filled.csv') to create a reusable trained model.
 """
 
 # ------------------------------
 # 1. Load dataset
 # ------------------------------
 print(" Loading dataset...")
-df = pd.read_csv("../data/merged_cleaned_dataset.csv")
+df = pd.read_csv("../data/merged_cleaned_dataset_filled.csv")
 print(f" Dataset loaded successfully: ({df.shape[0]}, {df.shape[1]})")
 
 # ------------------------------
-# 2. Create crisis label
+# 2. Identify key columns
 # ------------------------------
-change_col = None
-for col in df.columns:
-    if "change" in col.lower():
-        change_col = col
-        break
+change_col = next((c for c in df.columns if "change" in c.lower()), None)
+bond_col = next((c for c in df.columns if "bond" in c.lower() or "yield" in c.lower()), None)
+cds_col = next((c for c in df.columns if "cds" in c.lower()), None)
+deficit_col = next((c for c in df.columns if "deficit" in c.lower()), None)
 
-if change_col is None:
-    raise ValueError("No column containing 'change' found in dataset.")
+if not all([change_col, bond_col, cds_col, deficit_col]):
+    raise ValueError("Missing one of the key columns: bond, cds, change, or deficit.")
 
-df["crisis_label"] = (df[change_col] < -40).astype(int)  # slightly relaxed threshold
-print(" Crisis label created. Sample:")
+# ------------------------------
+# 3. Create crisis_label
+# ------------------------------
+df["crisis_label"] = (df[change_col] < -1).astype(int)
+print("\nCrisis label sample:")
 print(df[[change_col, "crisis_label"]].head())
 
 # ------------------------------
-# 3. Prepare features
+# 4. Select features (no manual weights)
+# ------------------------------
+X = df[[bond_col, cds_col, deficit_col]].copy()
+y = df["crisis_label"]
+
+# ------------------------------
+# 5. Select features
 # ------------------------------
 X = df.select_dtypes(include=["float64", "int64"]).drop(columns=["crisis_label"], errors="ignore")
 y = df["crisis_label"]
@@ -82,12 +79,15 @@ y = df["crisis_label"]
 X = X.dropna(axis=1, how="all")
 
 # ------------------------------
-# 4. Balance dataset (Upsampling)
+# 6. Balance dataset
 # ------------------------------
-print(" Balancing dataset...")
+print("\nBalancing dataset...")
 df_balanced = pd.concat([X, y], axis=1)
 majority = df_balanced[df_balanced["crisis_label"] == 0]
 minority = df_balanced[df_balanced["crisis_label"] == 1]
+
+if len(minority) == 0:
+    raise ValueError("No crisis cases found. The label threshold might be too strict.")
 
 minority_upsampled = resample(
     minority,
@@ -101,79 +101,57 @@ X_bal = df_balanced.drop("crisis_label", axis=1)
 y_bal = df_balanced["crisis_label"]
 
 # ------------------------------
-# 5. Impute missing values
+# 7. Impute + scale
 # ------------------------------
 imputer = SimpleImputer(strategy="median")
 X_bal_imputed = pd.DataFrame(imputer.fit_transform(X_bal), columns=X_bal.columns)
 
-# ------------------------------
-# 6. Feature scaling
-# ------------------------------
 scaler = StandardScaler()
 X_bal_scaled = pd.DataFrame(scaler.fit_transform(X_bal_imputed), columns=X_bal.columns)
 
 # ------------------------------
-# 7. Train-test split
+# 8. Train-test split
 # ------------------------------
 X_train, X_test, y_train, y_test = train_test_split(
     X_bal_scaled, y_bal, test_size=0.2, random_state=42
 )
-print(f" Training samples: {X_train.shape[0]}, Test samples: {X_test.shape[0]}")
 
 # ------------------------------
-# 8. Train model
+# 9. Train model (Logistic Regression)
 # ------------------------------
 model = LogisticRegression(max_iter=5000, solver="saga", class_weight="balanced")
 model.fit(X_train, y_train)
 
-print("\nExample crisis probabilities:", model.predict_proba(X_bal_scaled)[:10])
-
-
 # ------------------------------
-# 9. Evaluate
+# 10. Evaluate model
 # ------------------------------
-y_pred_proba = model.predict_proba(X_test)[:, 1]  
-y_pred = (y_pred_proba > 0.5).astype(int)         
+y_pred_proba = model.predict_proba(X_test)[:, 1]
+y_pred = (y_pred_proba > 0.5).astype(int)
 
-print("\n Model Evaluation Results:")
+print("\nModel Evaluation:")
 print(classification_report(y_test, y_pred))
 print("Accuracy:", round(accuracy_score(y_test, y_pred), 3))
 
-print("\nExample crisis probabilities:", y_pred_proba[:10]) 
-
-# ===============================
-# Additional Model Performance Checks
-# ===============================
-
-from sklearn.metrics import (
-    confusion_matrix,
-    roc_auc_score,
-    precision_score,
-    recall_score,
-)
-
-# Confusion Matrix
-cm = confusion_matrix(y_test, y_pred)
-print("\nConfusion Matrix:")
-print(cm)
-
-# ROC-AUC Score
-roc_auc = roc_auc_score(y_test, y_pred_proba)
-print("ROC-AUC Score:", round(roc_auc, 4))
-
-# Precision & Recall
-precision = precision_score(y_test, y_pred)
-recall = recall_score(y_test, y_pred)
-
-print("\nPrecision:", round(precision, 4))
-print("Recall:", round(recall, 4))
-
+print("\nExample crisis probabilities:", y_pred_proba[:10])
 
 # ------------------------------
-# 10. Save model, imputer, and scaler
+# 11. Feature Importance (Logistic Regression)
 # ------------------------------
-# Save updated model
+coefficients = pd.DataFrame({
+    "feature": X_bal.columns,
+    "coefficient": model.coef_[0]
+}).sort_values(by="coefficient", ascending=False)
+
+print("\nFeature Importance (Logistic Regression):")
+print(coefficients)
+
+# Optional export:
+# coefficients.to_csv("../data/feature_importance_logistic.csv", index=False)
+
+# ------------------------------
+# 12. Save model
+# ------------------------------
 joblib.dump(model, "../data/crisis_model.pkl")
 joblib.dump(imputer, "../data/imputer.pkl")
 joblib.dump(scaler, "../data/scaler.pkl")
-print(" Model, imputer, and scaler saved again.")
+print("\nModel, imputer, and scaler saved to /data")
