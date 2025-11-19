@@ -1,3 +1,15 @@
+"""
+Enhanced Visualization for Crisis Prediction
+--------------------------------------------
+Creates multiple economic plots + summaries:
+    1. Top 10 highest-risk observations
+    2. Crisis trend over time (line plot)
+    3. Country-level average risk
+    4. Region-level comparison
+    5. Yearly crisis distribution (histogram)
+Exports useful CSV tables to support analysis.
+"""
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -7,182 +19,118 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import os
-from sklearn.ensemble import RandomForestClassifier
 
-
-
-
-"""
-Visualize_predictions.py
-------------------------
-
-This script generates a visual and tabular summary of the top predicted crisis probabilities
-from the trained logistic regression model. It loads the saved model, imputer, and scaler
-produced by `train_model.py`, applies them to the cleaned dataset from `model.py`, and
-creates an interpretable visualization of countries or years most at risk of financial crisis.
-
-Main steps:
-    1. Load the trained model, imputer, scaler, and cleaned dataset.
-    2. Identify key columns such as "change", "country", and "year".
-    3. Prepare input features for prediction by aligning, imputing, and scaling them.
-    4. Generate predicted crisis probabilities for each observation.
-    5. Select the top 10 highest-risk observations and display their probabilities,
-       countries, and regions.
-    6. Save both a CSV table and a horizontal bar chart showing the top predicted risks.
-
-Outputs:
-    - ../data/top10_crisis_probs.csv : Table of top 10 crisis-risk observations
-    - ../data/top10_crisis_probs.png : Visualization of predicted crisis probabilities
-
-Purpose:
-    This script provides a transparent and visual way to interpret the model's predictions.
-    It highlights which observations (e.g., specific years for Greece) the model considers
-    most at risk, helping illustrate how early-warning tools can inform policymakers and
-    economists before a crisis develops.
-
-Intended Use:
-    Part of the ECON 302 project on building an early-warning system for the Greek
-    financial crisis using economic indicators and machine learning.
-    The focus is on clarity, reproducibility, and clear economic interpretation rather
-    than algorithmic complexity.
-"""
-
-print("Loading model and preprocessing tools...")
-
-# ------------------------
-# PATHS
-# ------------------------
+# ================================
+#  PATHS
+# ================================
 DATA_DIR = "../data"
-MODEL_PATH = os.path.join(DATA_DIR, "crisis_model.pkl")
-IMPUTER_PATH = os.path.join(DATA_DIR, "imputer.pkl")
-SCALER_PATH = os.path.join(DATA_DIR, "scaler.pkl")
-DATASET_PATH = os.path.join(DATA_DIR, "merged_cleaned_dataset.csv")
+MODEL_PATH = f"{DATA_DIR}/crisis_model.pkl"
+IMPUTER_PATH = f"{DATA_DIR}/imputer.pkl"
+SCALER_PATH = f"{DATA_DIR}/scaler.pkl"
+DATASET_PATH = f"{DATA_DIR}/merged_cleaned_dataset.csv"
 
-# ------------------------
-# LOAD MODEL + DATA
-# ------------------------
-model = joblib.load(MODEL_PATH)
-imputer = joblib.load(IMPUTER_PATH)
-scaler = joblib.load(SCALER_PATH)
-df = pd.read_csv(DATASET_PATH)
+# ================================
+# 1. LOAD MODEL & DATA
+# ================================
+def load_model_and_data():
+    print("Loading model and dataset...")
+    model = joblib.load(MODEL_PATH)
+    imputer = joblib.load(IMPUTER_PATH)
+    scaler = joblib.load(SCALER_PATH)
+    df = pd.read_csv(DATASET_PATH)
 
-print("\nDataset columns:")
-print(df.columns)
+    # Clean country formatting
+    df["country"] = df["country"].str.strip().str.title()
+    df = df.loc[:, ~df.columns.str.contains("Unnamed", case=False)]
 
-# ------------------------
-# COLUMN IDENTIFICATION
-# ------------------------
-change_col = [c for c in df.columns if "change" in c.lower()][0]
-country_col = next((c for c in df.columns if "country" in c.lower()), None)
-year_col = next((c for c in df.columns if "time_period" in c.lower() or "year" in c.lower()), None)
+    print(f"✓ Dataset loaded: {df.shape}")
+    return model, imputer, scaler, df
 
-# Drop unwanted columns
-df = df.loc[:, ~df.columns.str.contains("Unnamed", case=False)]
-X = df.select_dtypes(include=["float64", "int64"]).drop(columns=["crisis_label"], errors="ignore")
+# ================================
+# 2. FEATURE PREP
+# ================================
+def prepare_features(df, imputer, scaler):
+    X = df.select_dtypes(include=["float64", "int64"]).drop(columns=["crisis_label"], errors="ignore")
+    expected_cols = getattr(imputer, "feature_names_in_", X.columns)
+    X = X[[c for c in expected_cols if c in X.columns]]
 
-# ------------------------
-# PREPROCESSING
-# ------------------------
-expected_cols = getattr(imputer, "feature_names_in_", X.columns)  # align column order
-X = X[[c for c in expected_cols if c in X.columns]]
+    X_imputed = pd.DataFrame(imputer.transform(X), columns=X.columns)
+    X_scaled = pd.DataFrame(scaler.transform(X_imputed), columns=X.columns)
+    return X_scaled
 
-X_imputed = pd.DataFrame(imputer.transform(X), columns=X.columns)
-X_scaled = pd.DataFrame(scaler.transform(X_imputed), columns=X.columns)
+# ================================
+# 3. CRISIS PROBABILITY
+# ================================
+def compute_predictions(model, X, df):
+    df["crisis_prob"] = model.predict_proba(X)[:, 1]
+    df["year"] = pd.to_datetime(df["date"], errors="coerce").dt.year
+    return df
 
+# ================================
+# 4. VISUALIZATIONS
+# ================================
 
-df["crisis_prob"] = model.predict_proba(X_scaled)[:, 1]
+def plot_top10_risk(df):
+    top10 = df.sort_values("crisis_prob", ascending=False).head(10)
+    top10.to_csv(f"{DATA_DIR}/top10_crisis_probs.csv", index=False)
 
-# ------------------------
-# REGION MAPPING
-# ------------------------
-region_map = {
-    "Greece": "Europe",
-    "Italy": "Europe",
-    "Spain": "Europe",
-    "France": "Europe",
-    "Germany": "Europe",
-    "Turkey": "Europe/Asia",
-    "Egypt": "Africa",
-    "India": "Asia",
-    "Indonesia": "Asia",
-    "South Africa": "Africa",
-}
-if country_col:
-    df[country_col] = df[country_col].str.strip().str.title()
-    df["region"] = df[country_col].map(region_map).fillna("Other")
-else:
-    df["region"] = "Unknown"
+    plt.figure(figsize=(10,6))
+    plt.barh(top10["country"], top10["crisis_prob"])
+    plt.gca().invert_yaxis()
+    plt.title("Top 10 Predicted Crisis Probabilities")
+    plt.xlabel("Crisis Probability")
+    plt.tight_layout()
+    plt.savefig(f"{DATA_DIR}/top10_crisis_probs.png")
+    plt.close()
 
-# ------------------------
-# CREATE YEAR DISPLAY
-# ------------------------
+def plot_risk_trends_over_time(df):
+    df_grouped = df.groupby(["year"])["crisis_prob"].mean()
+    plt.figure(figsize=(10,5))
+    plt.plot(df_grouped.index, df_grouped.values, marker="o")
+    plt.title("Average Crisis Probability Over Time")
+    plt.xlabel("Year")
+    plt.ylabel("Avg Crisis Probability")
+    plt.tight_layout()
+    plt.savefig(f"{DATA_DIR}/crisis_trend_over_time.png")
+    plt.close()
 
-#Find best potential date column
-date_cols = [c for c in df.columns if "date" in c.lower() or "time" in c.lower()]
-print("\nPossible date columns:", date_cols)
-print(df[date_cols].head())  # Show sample values
+def plot_country_risk_average(df):
+    country_avg = df.groupby("country")["crisis_prob"].mean().sort_values(ascending=False).head(10)
+    country_avg.to_csv(f"{DATA_DIR}/avg_risk_by_country.csv")
 
-# Extract year using safe regex (only if 4 digits appear)
-if date_cols:
-    df["year_display"] = df[date_cols[0]].astype(str).str.extract(r'(\d{4})')
-else:
-    df["year_display"] = "Unknown"
+    plt.figure(figsize=(10,6))
+    plt.barh(country_avg.index, country_avg.values)
+    plt.gca().invert_yaxis()
+    plt.title("Top 10 Countries by Average Crisis Risk")
+    plt.xlabel("Average Crisis Probability")
+    plt.tight_layout()
+    plt.savefig(f"{DATA_DIR}/avg_risk_by_country.png")
+    plt.close()
 
-# Replace invalid years (e.g., <2000 or >2025)
-df["year_display"] = pd.to_numeric(df["year_display"], errors="coerce")  # convert to float or NaN
-df["year_display"] = df["year_display"].apply(lambda x: int(x) if not pd.isna(x) else "Unknown")
+def plot_yearly_risk_histogram(df):
+    plt.figure(figsize=(10,6))
+    plt.hist(df["year"], bins=20)
+    plt.title("Frequency of Crisis-like Years")
+    plt.xlabel("Year")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(f"{DATA_DIR}/yearly_crisis_histogram.png")
+    plt.close()
 
-# ------------------------
-# SORT & SELECT TOP 10
-# ------------------------
-sort_cols = ["crisis_prob"]
-ascending = [False]
+# ================================
+# 5. MAIN EXECUTION
+# ================================
+def main():
+    model, imputer, scaler, df = load_model_and_data()
+    X = prepare_features(df, imputer, scaler)
+    df = compute_predictions(model, X, df)
 
-top10 = df.sort_values(by=sort_cols, ascending=ascending).head(10).reset_index(drop=True)
+    plot_top10_risk(df)
+    plot_risk_trends_over_time(df)
+    plot_country_risk_average(df)
+    plot_yearly_risk_histogram(df)
 
-# Reset index to start from 1
-top10 = top10.reset_index(drop=True)
-top10.index = top10.index + 1
+    print("\n✓ All plots and CSV summaries saved in /data")
 
-
-# Remove empty year column if all NA
-if top10["year_display"].isna().all():
-    top10 = top10.drop(columns=["year_display"])
-
-# ------------------------
-# DISPLAY RESULT
-# ------------------------
-cols_to_show = [c for c in ["country", "year_display", change_col, "crisis_prob", "region"] if c in top10.columns]
-print("\nTop 10 Highest–Risk Observations:")
-print(top10[cols_to_show])
-
-# ------------------------
-# SAVE CSV
-# ------------------------
-CSV_OUT = os.path.join(DATA_DIR, "top10_crisis_probs.csv")
-top10.to_csv(CSV_OUT, index=False)
-
-# ------------------------
-# VISUALIZATION
-# ------------------------
-color_palette = plt.cm.tab10.colors
-unique_regions = sorted(top10["region"].unique())
-color_map = {region: color_palette[i % len(color_palette)] for i, region in enumerate(unique_regions)}
-top10["color"] = top10["region"].map(color_map)
-
-plt.figure(figsize=(10,6))
-bars = plt.barh(top10["country"], top10["crisis_prob"], color=top10["color"])
-plt.gca().invert_yaxis()
-
-handles = [plt.Rectangle((0, 0), 1, 1, color=color_map[r], label=r) for r in unique_regions]
-plt.legend(handles=handles, title="Region", bbox_to_anchor=(1.05, 1), loc="upper left")
-
-plt.title("Top 10 Predicted Crisis Probabilities by Country")
-plt.xlabel("Predicted Crisis Probability")
-plt.tight_layout()
-
-PNG_OUT = os.path.join(DATA_DIR, "top10_crisis_probs.png")
-plt.savefig(PNG_OUT, dpi=150, bbox_inches="tight")
-
-print(f"\nSaved visualization to {PNG_OUT}")
-print(f"Saved labeled data to {CSV_OUT}")
+if __name__ == "__main__":
+    main()
