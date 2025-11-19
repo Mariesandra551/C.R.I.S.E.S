@@ -1,56 +1,46 @@
 import pandas as pd
 from pathlib import Path
 
+# ------------------------------------------------------------
+# fill_deficit.py — MAKE DEFICIT DATA MONTHLY & CONSISTENT
+# ------------------------------------------------------------
 
-
-"""
-fill_deficit.py
-
-This script loads the merged dataset produced by `model.py` and
-ensures that annual deficit values are properly aligned with monthly data.
-
-Purpose:
-• Deficit values are reported yearly, while bond & CDS values are monthly.
-• For each year, the deficit value should fill all months in that year.
-  → Forward-fill and backward-fill are applied within each country and year.
-
-Process:
-1. Load `merged_cleaned_dataset.csv`.
-2. Extract the year from the `date` column.
-3. Group by (country, year) and forward-fill / backward-fill deficit values.
-4. Preserve original monthly bond and CDS data.
-5. Save updated CSV (overwrites existing file).
-
-This file ensures that deficit data is consistently usable for machine
-learning and statistical models that require aligned time-series inputs.
-"""
-
-# Paths
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR.parent / "data" / "merged_cleaned_dataset.csv"
 OUT_PATH  = BASE_DIR.parent / "data" / "merged_cleaned_dataset_filled.csv"
 
 print("Reading:", DATA_PATH)
-
-# Read
 df = pd.read_csv(DATA_PATH)
+
+# Ensure datetime format
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
-# ---- FILL DEFICIT CHANGE WITHIN SAME YEAR AND COUNTRY ----
-df["year"] = df["date"].dt.year  # temporary
-df = df.sort_values(["country", "year", "date"])
+# Target columns
+cols = ["bond_yield_change", "cds_change", "deficit_change"]
 
-df["deficit_change"] = (
-    df.groupby(["country", "year"])["deficit_change"]
-      .transform(lambda x: x.ffill().bfill())      # works with missing in middle
+# 1. Interpolate — keeps monthly economic smoothness
+df[cols] = (
+    df.groupby("country")[cols]
+      .transform(lambda group: group.interpolate(method="linear", limit_direction="both"))
 )
 
-# Drop the temp year column
-df = df.drop(columns=["year"])
+# 2. Median fill — avoids overfitting / wild values
+df[cols] = (
+    df.groupby("country")[cols]
+      .transform(lambda x: x.fillna(x.median()))
+)
 
-# Final save
+# 3. Drop fully empty rows
+df = df.dropna(subset=cols, how="all").reset_index(drop=True)
+
+# 4. Sort for rolling windows later
+df = df.sort_values(by=["country", "date"], ascending=[True, False]).reset_index(drop=True)
+
+# 5. Save result
 df.to_csv(OUT_PATH, index=False)
+print(f"✔ Saved cleaned dataset to: {OUT_PATH}")
+print("Final shape:", df.shape)
 
-print("\nSUCCESS — Saved deficit-filled dataset to:")
-print(OUT_PATH)
-print(df.head())
+# OPTIONAL: diagnostic print for report
+print("\nRemaining NaNs per column:")
+print(df[cols].isna().sum())

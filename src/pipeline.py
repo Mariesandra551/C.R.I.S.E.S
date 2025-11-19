@@ -13,5 +13,6 @@ def main():
     run_script("train_model.py")
     run_script("visualize_predictions.py")  # visualization stays here
 
+
 if __name__ == "__main__":
     main()
