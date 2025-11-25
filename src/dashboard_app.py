@@ -32,6 +32,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 import altair as alt
 from pathlib import Path
 
@@ -141,32 +142,59 @@ ax.set_ylabel("Crisis Probability")
 plt.xticks(rotation=45)
 st.pyplot(fig)
 
-# -----------------------------
-# 6. RISK LEVEL BREAKDOWN (COLORED)
-# -----------------------------
-st.subheader("Risk Level Breakdown")
+# -------------------------------
+# 6. TRAFFIC LIGHT VIEW
+# -------------------------------
+st.subheader("Risk Evolution Over Time (Traffic Light View)")
 
-risk_counts = df_filtered["risk_level"].value_counts().reset_index()
-risk_counts.columns = ["risk_level", "count"]
+df["year"] = df["date"].dt.year
 
-color_map = {
-    "GREEN": "#2ecc71",
-    "YELLOW": "#f1c40f",
-    "RED": "#e74c3c"
-}
+severity_map = {"GREEN": 0, "YELLOW": 1, "RED": 2}
+inv_map      = {0: "GREEN", 1: "YELLOW", 2: "RED"}
+df["severity"] = df["risk_level"].map(severity_map)
 
-chart = (
-    alt.Chart(risk_counts)
-    .mark_bar()
-    .encode(
-        x=alt.X("risk_level:N", title="Risk Level"),
-        y=alt.Y("count:Q", title="Number of Observations"),
-        color=alt.Color("risk_level:N", scale=alt.Scale(domain=list(color_map.keys()),
-                                                       range=list(color_map.values())))
-    )
+# Choose worst value (max severity) per year
+year_severity = (
+    df.groupby(["country", "year"])["severity"]
+      .max()
+      .unstack(fill_value=0)
+      .applymap(lambda x: inv_map[x])
 )
 
-st.altair_chart(chart, use_container_width=True)
+# Convert to numeric matrix
+heatmap_data = [[severity_map[val] for val in row] for row in year_severity.values]
+
+# CUSTOM COLOR PALETTE (exact match)
+from matplotlib.colors import ListedColormap
+cmap = ListedColormap(["#2ecc71", "#f1c40f", "#e74c3c"])  # green, yellow, red
+
+# Create figure
+fig, ax = plt.subplots(figsize=(14, 7))
+im = ax.imshow(heatmap_data, cmap=cmap, aspect="equal")  # square cells
+
+# Axis fix
+ax.set_yticks(range(len(year_severity.index)))
+ax.set_yticklabels(year_severity.index)
+
+ax.set_xticks(range(len(year_severity.columns)))
+ax.set_xticklabels(year_severity.columns.astype(int), rotation=45)
+
+# Add thin gridlines to define cells
+ax.set_xticks(np.arange(-.5, len(year_severity.columns), 1), minor=True)
+ax.set_yticks(np.arange(-.5, len(year_severity.index), 1), minor=True)
+ax.grid(which="minor", color='gray', linestyle='-', linewidth=0.3)
+
+# Legend
+cbar = plt.colorbar(im, ticks=[0, 1, 2])
+cbar.ax.set_yticklabels(["GREEN", "YELLOW", "RED"])
+
+# Titles
+plt.title("Risk Evolution by Country and Year (Traffic Light View")
+plt.xlabel("Year")
+plt.ylabel("Country")
+
+# Display
+st.pyplot(fig)
 
 # ------------------------------------
 # 7. FEATURE IMPORTANCE (Predictive Model Insight)
