@@ -1,13 +1,38 @@
 import pandas as pd
 from pathlib import Path
 
-# ------------------------------------------------------------
-# fill_deficit.py — MAKE DEFICIT DATA MONTHLY & CONSISTENT
-# ------------------------------------------------------------
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR.parent / "data" / "merged_cleaned_dataset.csv"
 OUT_PATH  = BASE_DIR.parent / "data" / "merged_cleaned_dataset_filled.csv"
+
+
+
+"""
+This script processes the merged economic dataset and ensures that the
+deficit variable is properly aligned with monthly financial data. It converts
+incomplete fiscal data into **smooth, gap-free monthly signals**, enabling
+consistent feature engineering and model training.
+
+Workflow:
+1. Read `merged_cleaned_dataset.csv` from `/data`.
+2. Convert the date column into proper datetime format.
+3. For each country:
+       • Interpolate missing values (linear method) to preserve
+         monthly economic continuity.
+       • Fill remaining gaps using country-level median values to
+         avoid bias or extreme jumps.
+4. Remove rows where ALL three indicators are missing.
+5. Sort data by country and date (descending) to prepare rolling windows.
+6. Save final output to `merged_cleaned_dataset_filled.csv`.
+
+This file finalizes the **clean, monthly-aligned input dataset** used for:
+- economic shock creation,
+- rolling-window feature engineering,
+- GMM regime detection,
+- and crisis probability estimation.
+"""
 
 print("Reading:", DATA_PATH)
 df = pd.read_csv(DATA_PATH)

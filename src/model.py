@@ -3,9 +3,16 @@ from pathlib import Path
 
 
 
-"""
-model.py
+# ------------------------------
+# 1. Paths
+# ------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+DATA_PATH = BASE_DIR.parent / "data" / "Final Greek Crisis Data.xlsx"
+OUT_PATH = BASE_DIR.parent / "data" / "merged_cleaned_dataset.csv"
 
+
+
+"""
 This script reads multiple sheets from the Excel file
 `Final Greek Crisis Data.xlsx`, each sheet representing one country.
 It restructures the data into a machine-learning–ready format and merges all
@@ -25,13 +32,6 @@ This file forms the core dataset used for time-series analysis,
 feature engineering, and machine learning model development for
 crisis prediction.
 """
-
-# ------------------------------
-# 1. Paths
-# ------------------------------
-BASE_DIR = Path(__file__).resolve().parent
-DATA_PATH = BASE_DIR.parent / "data" / "Final Greek Crisis Data.xlsx"
-OUT_PATH = BASE_DIR.parent / "data" / "merged_cleaned_dataset.csv"
 
 print("Reading:", DATA_PATH)
 
